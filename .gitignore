@@ -1,0 +1,14 @@
+# Aufgezeichnete Fahrdaten - gehoeren nicht ins Repository
+laps/
+refs/
+session.jsonl
+session.jsonl.bak
+latest.txt
+*.log
+*.ibt
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/

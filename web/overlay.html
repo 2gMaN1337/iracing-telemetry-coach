@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Coach Overlay</title>
+<style>
+  /* Bewusst konservativ gehalten: vh/vw statt Container-Query-Einheiten und
+     kein modernes JS - Overlay-Programme bringen teils aeltere Browser-Engines
+     mit, und dort bleibt die Seite sonst stumm stehen. */
+  :root{
+    --bg:#0a0c0f; --tx:#F2F5F8; --mut:#8A94A2; --line:#1E252E;
+    --brake:#FF3B2F; --gas:#25D96F; --warn:#FFB020; --acc:#4CC9D4;
+  }
+  *{box-sizing:border-box;margin:0}
+  html,body{height:100%}
+  body{
+    background:#0a0c0f;background:var(--bg);
+    color:#F2F5F8;color:var(--tx);overflow:hidden;
+    font:500 16px/1.2 "Segoe UI",Arial,sans-serif;
+    display:flex;flex-direction:column;padding:3.5vh 4vw;
+  }
+  .lbl{font-size:4vh;letter-spacing:.16em;text-transform:uppercase;color:#8A94A2;color:var(--mut)}
+  .hide{display:none!important}
+
+  /* ---------- Live-Marker ---------- */
+  #marker{flex:1;display:flex;flex-direction:column;justify-content:center}
+  #mk-head{display:flex;align-items:baseline}
+  #mk-word{font-size:13vh;font-weight:800;line-height:1}
+  #mk-corner{font-size:5vh;color:#8A94A2;color:var(--mut);letter-spacing:.1em;
+    text-transform:uppercase;margin-left:3vw}
+  #mk-dist{margin-left:auto;font-size:13vh;font-weight:800;line-height:1}
+  #mk-unit{font-size:5vh;color:#8A94A2;color:var(--mut);margin-left:.6vw}
+  #mk-bar{height:5vh;background:#161C24;border-radius:.8vh;overflow:hidden;margin-top:1.5vh}
+  #mk-fill{height:100%;width:0;border-radius:.8vh;background:#FF3B2F}
+  .brake #mk-word,.brake #mk-dist{color:#FF3B2F;color:var(--brake)}
+  .brake #mk-fill{background:#FF3B2F;background:var(--brake)}
+  .gas #mk-word,.gas #mk-dist{color:#25D96F;color:var(--gas)}
+  .gas #mk-fill{background:#25D96F;background:var(--gas)}
+  .now #mk-dist{visibility:hidden}
+  .now #mk-word{font-size:17vh}
+
+  /* ---------- Coaching zwischen den Kurven ---------- */
+  #main{flex:1;display:flex;flex-direction:column;justify-content:center;
+    border-left:1vw solid #FFB020;border-left-color:var(--warn);padding-left:3.5vw}
+  #corner{font-size:6vh;color:#FFB020;color:var(--warn);letter-spacing:.08em;
+    text-transform:uppercase;font-weight:600}
+  #fix{font-size:11vh;font-weight:700;line-height:1.1}
+  #second{display:flex;align-items:baseline;margin-top:2.5vh;
+    border-left:1vw solid #1E252E;border-left-color:var(--line);padding-left:3.5vw;
+    color:#8A94A2;color:var(--mut);font-size:5.5vh}
+  #second b{color:#C4CCD6;font-weight:600;margin-left:2vw}
+
+  /* ---------- Fussleiste ---------- */
+  footer{display:flex;align-items:center;margin-top:2.5vh;
+    border-top:.5vh solid #1E252E;border-top-color:var(--line);padding-top:2.4vh}
+  footer span{margin-right:3vw}
+  footer .v{font-size:6vh;font-weight:700}
+  .hot{color:#FF3B2F;color:var(--brake)} .cold{color:#4CC9D4;color:var(--acc)}
+  .ok{color:#25D96F;color:var(--gas)}
+  #bias-adv{margin-left:auto;margin-right:0;font-size:5.5vh;font-weight:700;
+    color:#0a0c0f;background:#FFB020;background:var(--warn);
+    padding:1vh 2.2vw;border-radius:.7vh}
+  #stale{position:fixed;top:1.8vh;right:2.2vw;width:1.8vh;height:1.8vh;
+    border-radius:50%;background:#25D96F}
+  #stale.off{background:#39424E}
+  #dbg{position:fixed;left:2vw;bottom:.5vh;font-size:2.4vh;color:#4a5563}
+</style>
+</head>
+<body>
+  <div id="stale"></div>
+
+  <div id="marker" class="hide">
+    <div id="mk-head">
+      <span id="mk-word">BREMSEN</span>
+      <span id="mk-corner">Kurve 1</span>
+      <span id="mk-dist">120<span id="mk-unit">m</span></span>
+    </div>
+    <div id="mk-bar"><div id="mk-fill"></div></div>
+  </div>
+
+  <div id="main">
+    <span id="corner">warte auf Runde</span>
+    <span id="fix">&mdash;</span>
+  </div>
+  <div id="second" class="hide"><span id="corner2"></span><b id="fix2"></b></div>
+
+  <footer>
+    <span class="lbl">Balance</span><span class="v" id="bias">&mdash;</span>
+    <span class="lbl">Rotation</span><span class="v" id="rot">&mdash;</span>
+    <span id="bias-adv" class="hide"></span>
+  </footer>
+  <div id="dbg"></div>
+
+<script>
+/* Absichtlich ES5: kein fetch, kein async/await, keine ?? oder ?. -
+   damit die Seite auch in aelteren Overlay-Browsern laeuft. */
+function $(id){ return document.getElementById(id); }
+
+var LEAD = 0, DEBUG = false;
+(function(){
+  var q = location.search.replace('?','').split('&');
+  for (var i = 0; i < q.length; i++){
+    var kv = q[i].split('=');
+    if (kv[0] === 'lead') LEAD = Math.max(0, parseFloat(kv[1]) || 0);
+    if (kv[0] === 'debug') DEBUG = kv[1] !== '0';
+  }
+})();
+
+var NOW_WINDOW = 6, lastTs = 0, hold = 0, errCount = 0;
+
+function get(url, cb){
+  var x = new XMLHttpRequest();
+  x.open('GET', url + (url.indexOf('?') < 0 ? '?' : '&') + '_=' + Date.now(), true);
+  x.onreadystatechange = function(){
+    if (x.readyState !== 4) return;
+    if (x.status === 200){
+      try { cb(JSON.parse(x.responseText)); }
+      catch (e){ note('JSON-Fehler: ' + e.message); }
+    } else { cb(null); note('HTTP ' + x.status + ' bei ' + url); }
+  };
+  x.onerror = function(){ cb(null); note('Verbindung fehlgeschlagen: ' + url); };
+  x.send();
+}
+
+function note(msg){
+  errCount++;
+  if (DEBUG) $('dbg').innerHTML = msg;
+}
+
+function shorten(t){
+  if (!t) return '';
+  var parts = String(t).split(' - ');
+  return parts[parts.length - 1].replace(/\.$/, '').replace(/^du /, '').substring(0, 44);
+}
+
+/* ---------- Live-Marker ---------- */
+function tickLive(){
+  get('/api/live', function(s){
+    if (!s || !s.connected || !s.marker){ showMarker(null); return; }
+    showMarker(s.marker);
+  });
+}
+
+function showMarker(m){
+  var box = $('marker'), b = document.body;
+  if (!m){
+    if (new Date().getTime() < hold) return;
+    box.className = 'hide';
+    $('main').className = '';
+    b.className = '';
+    return;
+  }
+  var d = Math.max(0, m.dist - LEAD);
+  var span = m.type === 'brake' ? 300 : 100;
+  var now = d <= NOW_WINDOW;
+  box.className = '';
+  $('main').className = 'hide';
+  b.className = (m.type === 'brake' ? 'brake' : 'gas') + (now ? ' now' : '');
+  $('mk-word').innerHTML = now ? 'JETZT' : (m.type === 'brake' ? 'BREMSEN' : 'GAS');
+  $('mk-corner').innerHTML = 'Kurve ' + m.corner;
+  $('mk-dist').innerHTML = Math.round(d) + '<span id="mk-unit">m</span>';
+  $('mk-fill').style.width = (100 - Math.min(100, d / span * 100)).toFixed(1) + '%';
+  if (now) hold = new Date().getTime() + 350;
+}
+
+/* ---------- Coaching der letzten Runde ---------- */
+function tickLap(){
+  get('/api/latest', function(d){
+    if (!d){ $('stale').className = 'off'; return; }
+    $('stale').className = '';
+    if (DEBUG) $('dbg').innerHTML = 'Runde ' + d.lap + ' | ts ' + d.ts + ' | Fehler ' + errCount;
+    if (d.empty || d.ts === lastTs) return;
+    lastTs = d.ts;
+
+    if (!d.valid){
+      $('corner').innerHTML = 'Runde ung&uuml;ltig';
+      $('fix').innerHTML = d.reason ? String(d.reason).split(',')[0] : '';
+      $('second').className = 'hide';
+    } else {
+      $('corner').innerHTML = d.corner ? ('Kurve ' + d.corner) : 'sauber';
+      $('fix').innerHTML = d.fix ? shorten(d.fix) : 'so weiter';
+      if (d.corner2 && d.fix2){
+        $('corner2').innerHTML = 'Kurve ' + d.corner2;
+        $('fix2').innerHTML = shorten(d.fix2);
+        $('second').className = '';
+      } else $('second').className = 'hide';
+    }
+
+    $('bias').innerHTML = (d.bias === null || d.bias === undefined) ? '&mdash;' : d.bias;
+    var r = $('rot');
+    if (d.rotation === null || d.rotation === undefined){
+      r.innerHTML = '&mdash;'; r.className = 'v';
+    } else {
+      r.innerHTML = (d.rotation > 0 ? '+' : '') + Math.round(d.rotation);
+      r.className = 'v ' + (d.rotation > 22 ? 'hot' : (d.rotation < 12 ? 'cold' : 'ok'));
+    }
+    var a = $('bias-adv');
+    if (d.bias_advice){
+      a.innerHTML = d.bias_advice.indexOf('vorn') >= 0 ? 'BALANCE &rarr;VORN' : 'BALANCE &rarr;HINTEN';
+      a.className = '';
+    } else a.className = 'hide';
+  });
+}
+
+tickLap(); tickLive();
+setInterval(tickLap, 1500);
+setInterval(tickLive, 66);
+</script>
+</body>
+</html>

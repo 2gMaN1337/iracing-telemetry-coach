@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iRacing Telemetrie-Coach</title>
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#13161b; --panel2:#181c22; --line:#242a33;
+    --tx:#e7eaf0; --mut:#8992a3; --dim:#5b6472;
+    --cur:#f0b429; --ref:#6b7688; --loss:#ef4444; --gain:#22c55e;
+    --thr:#22c55e; --brk:#ef4444;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;background:var(--bg);color:var(--tx);
+    font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;
+    display:flex;flex-direction:column;overflow:hidden;
+  }
+  /* ---------- Kopf ---------- */
+  header{
+    display:flex;align-items:center;gap:18px;padding:10px 18px;
+    background:var(--panel);border-bottom:1px solid var(--line);flex:none;
+  }
+  header h1{font-size:14px;font-weight:600;margin:0;letter-spacing:.02em}
+  header .sub{color:var(--mut);font-size:13px}
+  .live{margin-left:auto;display:flex;align-items:center;gap:8px;color:var(--mut);font-size:12px}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--dim)}
+  .dot.on{background:var(--gain);box-shadow:0 0 0 3px rgba(34,197,94,.18)}
+  .live label{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none}
+
+  /* ---------- Rahmen ---------- */
+  main{flex:1;display:flex;min-height:0}
+  aside{
+    width:212px;flex:none;background:var(--panel);border-right:1px solid var(--line);
+    display:flex;flex-direction:column;min-height:0;
+  }
+  aside .cap{padding:10px 14px 6px;color:var(--mut);font-size:11px;
+    text-transform:uppercase;letter-spacing:.08em}
+  #laps{overflow-y:auto;padding:0 8px 12px}
+  .lap{
+    display:grid;grid-template-columns:26px 1fr auto;gap:8px;align-items:center;
+    padding:7px 8px;border-radius:6px;cursor:pointer;border:1px solid transparent;
+  }
+  .lap:hover{background:var(--panel2)}
+  .lap.sel{background:var(--panel2);border-color:#31465e}
+  .lap .n{color:var(--dim);font:11px var(--mono);text-align:right}
+  .lap .t{font:13px var(--mono)}
+  .lap .d{font:11px var(--mono);color:var(--mut)}
+  .lap.inv .t{color:var(--dim);text-decoration:line-through}
+  .lap.best .t{color:var(--cur)}
+  .lap .d.neg{color:var(--gain)} .lap .d.pos{color:var(--loss)}
+
+  section{flex:1;overflow-y:auto;padding:16px 20px 40px;min-width:0}
+
+  /* ---------- Runden-Kopf ---------- */
+  .hd{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;margin-bottom:4px}
+  .hd .big{font:600 30px/1 var(--mono);letter-spacing:-.01em}
+  .hd .dl{font:600 20px/1 var(--mono)}
+  .dl.pos{color:var(--loss)} .dl.neg{color:var(--gain)}
+  .hd .vs{color:var(--mut);font-size:13px}
+  .say{
+    margin:10px 0 16px;padding:9px 13px;border-radius:7px;
+    background:rgba(240,180,41,.09);border:1px solid rgba(240,180,41,.28);
+    color:var(--cur);font-size:14px;
+  }
+  .say b{font-weight:600}
+  .warn{background:rgba(239,68,68,.10);border-color:rgba(239,68,68,.3);color:#fca5a5}
+
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+  .chip{background:var(--panel);border:1px solid var(--line);border-radius:6px;
+    padding:6px 11px;font-size:12px;color:var(--mut)}
+  .chip b{color:var(--tx);font:13px var(--mono);font-weight:600}
+
+  /* ---------- Diagramme ---------- */
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:9px;
+    padding:12px 14px 8px;margin-bottom:14px}
+  .card h3{margin:0 0 2px;font-size:12px;font-weight:600;color:var(--mut);
+    text-transform:uppercase;letter-spacing:.07em;display:flex;gap:12px;align-items:center}
+  .key{display:flex;gap:12px;margin-left:auto;font-size:11px;
+    text-transform:none;letter-spacing:0;color:var(--mut)}
+  .key i{display:inline-block;width:9px;height:2px;vertical-align:middle;margin-right:5px}
+  svg{display:block;width:100%}
+  .grid{stroke:var(--line);stroke-width:1;vector-effect:non-scaling-stroke}
+  .ax{fill:var(--dim);font:10px var(--mono)}
+  .tr{fill:none;stroke-width:1.6;vector-effect:non-scaling-stroke}
+  .cross{stroke:#7c879b;stroke-width:1;vector-effect:non-scaling-stroke;
+    stroke-dasharray:3 3;pointer-events:none}
+  .read{position:sticky;top:0;float:right;font:11px var(--mono);color:var(--mut)}
+
+  /* ---------- Karte ---------- */
+  .maprow{display:grid;grid-template-columns:1.35fr 1fr;gap:14px}
+  @media(max-width:1000px){.maprow{grid-template-columns:1fr}}
+  .cmark{fill:var(--dim);font:9px var(--mono)}
+
+  /* ---------- Kurventabelle ---------- */
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:right;color:var(--mut);font-weight:500;font-size:11px;
+    text-transform:uppercase;letter-spacing:.06em;padding:0 8px 7px}
+  th:first-child,td:first-child{text-align:left}
+  td{padding:7px 8px;border-top:1px solid var(--line);text-align:right;
+    font:13px var(--mono)}
+  td:first-child{font:13px system-ui;font-weight:500}
+  tr.hot td{background:rgba(239,68,68,.06)}
+  .fnd{color:var(--mut);font:12px system-ui;text-align:left;padding:0 8px 9px}
+  .fnd div{padding:2px 0 2px 14px;position:relative}
+  .fnd div::before{content:"";position:absolute;left:3px;top:9px;
+    width:4px;height:4px;border-radius:50%;background:var(--dim)}
+  .muted{color:var(--dim)}
+  .empty{color:var(--mut);padding:40px 0;text-align:center}
+</style>
+</head>
+<body>
+<header>
+  <h1 id="ttl">Telemetrie-Coach</h1>
+  <span class="sub" id="sub"></span>
+  <div class="live">
+    <label><input type="checkbox" id="follow" checked> letzte Runde folgen</label>
+    <span class="dot" id="dot"></span><span id="stat">verbinde…</span>
+  </div>
+</header>
+
+<main>
+  <aside>
+    <div class="cap">Runden <span class="muted" id="cnt"></span></div>
+    <div id="laps"></div>
+  </aside>
+  <section id="view"><div class="empty">Warte auf Rundendaten…</div></section>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const fmtT = s => { const m=Math.floor(s/60), r=s-m*60;
+  return m ? `${m}:${r.toFixed(3).padStart(6,'0')}` : r.toFixed(3); };
+const sgn = v => (v>0?'+':'') + v.toFixed(3);
+const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+let LAPS = [], SEL = -1, DET = null;
+
+/* ---------- SVG-Helfer ---------- */
+function scaler(d, lo, hi, a, b){ return v => a + (v-lo)/((hi-lo)||1)*(b-a); }
+function path(xs, ys, sx, sy){
+  let p = '';
+  for(let i=0;i<xs.length;i++) p += (i?'L':'M') + sx(xs[i]).toFixed(1) + ' ' + sy(ys[i]).toFixed(1);
+  return p;
+}
+function chart(o){
+  const W=1000, H=o.h||150, PL=44, PR=8, PT=10, PB=o.axis?18:8;
+  const xs=o.x, lo=Math.min(...xs), hi=Math.max(...xs);
+  let ymin=o.min, ymax=o.max;
+  if(ymin===undefined){ const all=o.series.flatMap(s=>s.y);
+    ymin=Math.min(...all); ymax=Math.max(...all);
+    const pad=(ymax-ymin)*0.08||1; ymin-=pad; ymax+=pad; }
+  const sx=scaler(0,lo,hi,PL,W-PR), sy=scaler(0,ymin,ymax,H-PB,PT);
+  let g='';
+  const ticks = o.ticks || 4;
+  for(let i=0;i<=ticks;i++){
+    const v=ymin+(ymax-ymin)*i/ticks, y=sy(v);
+    g += `<line class="grid" x1="${PL}" x2="${W-PR}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}"/>`;
+    g += `<text class="ax" x="${PL-6}" y="${(y+3).toFixed(1)}" text-anchor="end">${o.fmt?o.fmt(v):Math.round(v)}</text>`;
+  }
+  if(o.zero!==undefined && o.zero>ymin && o.zero<ymax){
+    const y=sy(o.zero);
+    g += `<line x1="${PL}" x2="${W-PR}" y1="${y}" y2="${y}" stroke="#3d4553" stroke-width="1" vector-effect="non-scaling-stroke"/>`;
+  }
+  if(o.axis){
+    for(let i=0;i<=5;i++){ const v=lo+(hi-lo)*i/5;
+      g += `<text class="ax" x="${sx(v).toFixed(1)}" y="${H-4}" text-anchor="middle">${Math.round(v)}</text>`; }
+  }
+  let fills='';
+  for(const s of o.series){
+    if(s.fill){
+      const base=sy(o.zero!==undefined?o.zero:ymin);
+      let up='',dn='';
+      // getrennte Flaechen fuer Verlust (ueber Null) und Gewinn (unter Null)
+      for(const sign of [1,-1]){
+        let d='',open=false;
+        for(let i=0;i<xs.length;i++){
+          const v=s.y[i], on = sign>0 ? v>0 : v<0;
+          if(on && !open){ d+=`M${sx(xs[i]).toFixed(1)} ${base.toFixed(1)}`; open=true; }
+          if(on) d+=`L${sx(xs[i]).toFixed(1)} ${sy(v).toFixed(1)}`;
+          if(!on && open){ d+=`L${sx(xs[i-1]||xs[i]).toFixed(1)} ${base.toFixed(1)}Z`; open=false; }
+        }
+        if(open) d+=`L${sx(xs[xs.length-1]).toFixed(1)} ${base.toFixed(1)}Z`;
+        if(sign>0) up=d; else dn=d;
+      }
+      fills += `<path d="${up}" fill="var(--loss)" opacity=".22"/><path d="${dn}" fill="var(--gain)" opacity=".22"/>`;
+    }
+  }
+  let lines='';
+  for(const s of o.series)
+    lines += `<path class="tr" d="${path(xs,s.y,sx,sy)}" stroke="${s.c}"${s.dash?' stroke-dasharray="4 3"':''} opacity="${s.o||1}"/>`;
+  let marks='';
+  for(const m of (o.marks||[]))
+    marks += `<line class="grid" x1="${sx(m).toFixed(1)}" x2="${sx(m).toFixed(1)}" y1="${PT}" y2="${H-PB}" opacity=".55"/>`;
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:${H}px"
+    data-pl="${PL}" data-pr="${PR}" data-lo="${lo}" data-hi="${hi}">
+    ${marks}${g}${fills}${lines}
+    <line class="cross" y1="${PT}" y2="${H-PB}" x1="-9" x2="-9"/></svg>`;
+}
+
+/* ---------- Streckenkarte ---------- */
+function trackMap(m, marks){
+  if(!m) return '';
+  const all=[...m.rx,...m.cx], ally=[...m.ry,...m.cy];
+  const x0=Math.min(...all), x1=Math.max(...all), y0=Math.min(...ally), y1=Math.max(...ally);
+  const pad=40, W=1000, H=Math.max(320, Math.round(W*(y1-y0+2*pad)/(x1-x0+2*pad)));
+  const sx=scaler(0,x0-pad,x1+pad,0,W), sy=scaler(0,y0-pad,y1+pad,H,0);   // y invertiert = Nord oben
+  let ref=`<path d="${path(m.rx,m.ry,sx,sy)}" fill="none" stroke="#2b323d" stroke-width="13"
+      stroke-linejoin="round" stroke-linecap="round"/>`;
+  // gefahrene Linie, segmentweise nach Zeitgewinn/-verlust eingefaerbt
+  let seg='';
+  const d=m.delta;
+  for(let i=1;i<m.cx.length;i++){
+    const grad=d[i]-d[i-1];
+    const c = grad>0.0015 ? 'var(--loss)' : grad<-0.0015 ? 'var(--gain)' : '#93a0b4';
+    seg += `<line x1="${sx(m.cx[i-1]).toFixed(1)}" y1="${sy(m.cy[i-1]).toFixed(1)}"
+      x2="${sx(m.cx[i]).toFixed(1)}" y2="${sy(m.cy[i]).toFixed(1)}"
+      stroke="${c}" stroke-width="3.2" stroke-linecap="round"/>`;
+  }
+  let mk='';
+  for(const c of (marks||[]))
+    mk += `<circle cx="${sx(c.x).toFixed(1)}" cy="${sy(c.y).toFixed(1)}" r="3" fill="#8992a3"/>
+      <text class="cmark" x="${(sx(c.x)+7).toFixed(1)}" y="${(sy(c.y)+3).toFixed(1)}">T${c.n}</text>`;
+  return `<svg viewBox="0 0 ${W} ${H}" style="max-height:460px">${ref}${seg}${mk}</svg>`;
+}
+
+/* ---------- Rendern ---------- */
+function renderLaps(){
+  const best = Math.min(...LAPS.filter(l=>l.valid).map(l=>l.time));
+  $('#cnt').textContent = LAPS.length ? `(${LAPS.length})` : '';
+  $('#laps').innerHTML = LAPS.map((l,i)=>{
+    const cls = ['lap', i===SEL?'sel':'', l.valid?'':'inv', l.valid&&l.time===best?'best':''].join(' ');
+    const d = l.delta==null ? '' :
+      `<span class="d ${l.delta<0?'neg':'pos'}">${sgn(l.delta)}</span>`;
+    return `<div class="${cls}" data-i="${i}" title="${esc(l.reason||'')}">
+      <span class="n">${l.lap_no}</span><span class="t">${l.valid?l.time_str:'—'}</span>${d}</div>`;
+  }).join('');
+  document.querySelectorAll('.lap').forEach(e =>
+    e.onclick = () => { $('#follow').checked=false; select(+e.dataset.i); });
+}
+
+function renderDetail(d){
+  if(d.error){ $('#view').innerHTML = `<div class="empty">${esc(d.error)}</div>`; return; }
+  const t = d.traces, hasRef = !!t.delta;
+  const marks = (d.corners||[]).map(c=>c.d_start);
+
+  let head = `<div class="hd"><span class="big">${d.valid?d.time_str:'—'}</span>`;
+  if(hasRef) head += `<span class="dl ${d.delta>0?'pos':'neg'}">${sgn(d.delta)} s</span>
+    <span class="vs">gegen Referenz ${d.ref_time_str}</span>`;
+  head += `<span class="vs">Runde ${d.lap_no}</span></div>`;
+
+  if(!d.valid) head += `<div class="say warn"><b>Ungültig:</b> ${esc(d.reason)} — kein Vergleich.</div>`;
+  else if(d.spoken) head += `<div class="say"><b>Ansage:</b> ${esc(d.spoken)}</div>`;
+  if(d.warning) head += `<div class="say warn">${esc(d.warning)}</div>`;
+
+  let chips='';
+  if(d.stats) chips = `<div class="chips">
+    <div class="chip">Vollgas <b>${d.stats.full_throttle_pct}%</b></div>
+    <div class="chip">Bremse <b>${d.stats.brake_pct}%</b></div>
+    <div class="chip">Segeln <b>${d.stats.coast_pct}%</b></div>
+    <div class="chip">Überschneidung <b>${d.stats.overlap_m} m</b></div></div>`;
+
+  let cards='';
+  if(hasRef) cards += `<div class="card"><h3>Zeitverlust über die Runde
+      <span class="key"><span><i style="background:var(--loss)"></i>langsamer</span>
+      <span><i style="background:var(--gain)"></i>schneller</span></span></h3>
+    ${chart({x:t.dist, h:150, zero:0, marks,
+      series:[{y:t.delta, c:'#cbd3e1', fill:true}],
+      fmt:v=>v.toFixed(2)})}</div>`;
+
+  cards += `<div class="card"><h3>Geschwindigkeit (km/h)
+      <span class="key"><span><i style="background:var(--cur)"></i>diese Runde</span>
+      ${hasRef?'<span><i style="background:var(--ref)"></i>Referenz</span>':''}</span></h3>
+    ${chart({x:t.dist, h:170, marks, series:[
+      ...(hasRef?[{y:t.ref_speed,c:'var(--ref)',dash:1}]:[]),
+      {y:t.speed,c:'var(--cur)'}]})}</div>`;
+
+  cards += `<div class="card"><h3>Gas und Bremse (%)
+      <span class="key"><span><i style="background:var(--thr)"></i>Gas</span>
+      <span><i style="background:var(--brk)"></i>Bremse</span>
+      ${hasRef?'<span><i style="background:var(--ref)"></i>Referenz</span>':''}</span></h3>
+    ${chart({x:t.dist, h:150, min:-3, max:103, axis:true, marks, series:[
+      ...(hasRef?[{y:t.ref_throttle,c:'var(--ref)',dash:1,o:.75},
+                  {y:t.ref_brake,c:'var(--ref)',dash:1,o:.75}]:[]),
+      {y:t.throttle,c:'var(--thr)'},{y:t.brake,c:'var(--brk)'}]})}
+    <div style="text-align:right;color:var(--dim);font:10px var(--mono);margin-top:2px">Meter ab Start/Ziel</div></div>`;
+
+  if(hasRef && !d.map) cards += `<div class="card"><h3>Gefahrene Linie</h3>
+    <div style="color:var(--mut);padding:14px 0;font-size:13px;line-height:1.6">
+      Für diese Runde liegen keine Positionsdaten vor. iRacing stellt
+      <code style="color:var(--tx)">Lat</code>/<code style="color:var(--tx)">Lon</code>
+      nur in der Disk-Telemetrie bereit, nicht im Live-Speicher.<br>
+      Nach dem Stint nachladen mit
+      <code style="color:var(--cur)">python import_session.py --latest</code>
+      &mdash; dann erscheinen hier Linienvergleich und Blockierer-Erkennung.
+    </div></div>`;
+  if(d.map) cards += `<div class="card"><h3>Gefahrene Linie
+      <span class="key"><span><i style="background:#2b323d;height:5px"></i>Referenzlinie</span>
+      <span><i style="background:var(--loss)"></i>verliert</span>
+      <span><i style="background:var(--gain)"></i>gewinnt</span></span></h3>
+    ${trackMap(d.map, d.corner_marks)}</div>`;
+
+  let tbl='';
+  if(d.corners && d.corners.length){
+    tbl = `<div class="card"><h3>Abschnitte</h3><table><thead><tr>
+      <th>Kurve</th><th>ab m</th><th>Delta</th><th>davon Gerade</th>
+      <th>vMin</th><th>Ref</th><th>Bremse</th><th>Ref</th><th>ABS</th>
+      ${d.has_line?'<th>Linie</th>':''}</tr></thead><tbody>`;
+    for(const c of d.corners){
+      const hot = c.delta >= 0.05;
+      tbl += `<tr class="${hot?'hot':''}">
+        <td>${esc(c.name)}</td><td class="muted">${c.d_start}</td>
+        <td style="color:${c.delta>0?'var(--loss)':'var(--gain)'}">${sgn(c.delta)}</td>
+        <td class="muted">${sgn(c.delta_straight)}</td>
+        <td>${c.v_min}</td><td class="muted">${c.v_min_ref}</td>
+        <td>${c.d_brake??'–'}</td><td class="muted">${c.d_brake_ref??'–'}</td>
+        <td class="${c.abs_pct>25?'':'muted'}">${c.abs_pct==null?'–':c.abs_pct+'%'}</td>
+        ${d.has_line?`<td class="muted">${c.line?(c.line.apex>0?'+':'')+c.line.apex.toFixed(1)+' m':'–'}</td>`:''}</tr>`;
+      if(c.findings.length)
+        tbl += `<tr><td colspan="${d.has_line?10:9}" class="fnd">${
+          c.findings.map(f=>`<div>${esc(f)}</div>`).join('')}</td></tr>`;
+    }
+    tbl += '</tbody></table></div>';
+  }
+  $('#view').innerHTML = head + chips + cards + tbl;
+  hookCrosshair(t);
+}
+
+/* ---------- Fadenkreuz ---------- */
+function hookCrosshair(t){
+  const svgs=[...document.querySelectorAll('.card svg[data-pl]')];
+  const read=document.createElement('div');
+  svgs.forEach(s=>{
+    s.onmousemove = ev=>{
+      const r=s.getBoundingClientRect();
+      const PL=+s.dataset.pl, PR=+s.dataset.pr, lo=+s.dataset.lo, hi=+s.dataset.hi;
+      const px=(ev.clientX-r.left)/r.width*1000;
+      if(px<PL||px>1000-PR) return;
+      const dist=lo+(px-PL)/(1000-PR-PL)*(hi-lo);
+      svgs.forEach(o=>{ const l=o.querySelector('.cross');
+        const p=(dist-lo)/(hi-lo)*(1000-(+o.dataset.pr)-(+o.dataset.pl))+(+o.dataset.pl);
+        l.setAttribute('x1',p); l.setAttribute('x2',p); });
+      const i=Math.round((dist-t.dist[0])/(t.dist[t.dist.length-1]-t.dist[0])*(t.dist.length-1));
+      const j=Math.max(0,Math.min(t.dist.length-1,i));
+      read.textContent = `${Math.round(t.dist[j])} m · ${Math.round(t.speed[j])} km/h · Gas ${Math.round(t.throttle[j])}% · Bremse ${Math.round(t.brake[j])}%`
+        + (t.delta?` · ${sgn(t.delta[j])} s`:'');
+    };
+    s.onmouseleave = ()=> svgs.forEach(o=>{const l=o.querySelector('.cross');
+      l.setAttribute('x1',-9); l.setAttribute('x2',-9);});
+  });
+  if(svgs[0]){ read.className='read'; svgs[0].parentNode.querySelector('h3').appendChild(read); }
+}
+
+/* ---------- Laden ---------- */
+async function select(i){
+  SEL=i; renderLaps();
+  try{ DET = await (await fetch('/api/lap?i='+i)).json(); renderDetail(DET); }
+  catch(e){ $('#view').innerHTML = `<div class="empty">Fehler: ${esc(e)}</div>`; }
+}
+async function poll(){
+  try{
+    const r = await (await fetch('/api/laps')).json();
+    $('#dot').classList.add('on'); $('#stat').textContent='verbunden';
+    if(r.car) { $('#ttl').textContent = r.car;
+      $('#sub').textContent = `${r.track}${r.ref_time_str?' · Referenz '+r.ref_time_str:''}`; }
+    const grew = r.laps.length !== LAPS.length;
+    LAPS = r.laps;
+    if(!LAPS.length){ $('#view').innerHTML='<div class="empty">Noch keine Runden aufgezeichnet.</div>'; return; }
+    if(SEL<0 || (grew && $('#follow').checked)) await select(LAPS.length-1);
+    else renderLaps();
+  }catch(e){ $('#dot').classList.remove('on'); $('#stat').textContent='keine Verbindung'; }
+}
+document.onkeydown = e=>{
+  if(e.key==='ArrowUp'||e.key==='ArrowLeft'){ if(SEL>0){$('#follow').checked=false; select(SEL-1);} }
+  if(e.key==='ArrowDown'||e.key==='ArrowRight'){ if(SEL<LAPS.length-1){$('#follow').checked=false; select(SEL+1);} }
+};
+poll(); setInterval(poll, 3000);
+</script>
+</body>
+</html>
