@@ -1,16 +1,16 @@
 """Referenzrunden als CSV lesen und schreiben.
 
-Das Format ist das, welches VirtualCoach fuer eigene Referenzen annimmt und
-das Garage 61 exportiert: eine Kopfzeile, eine Zeile je Abtastpunkt, Werte
-in iRacing-Einheiten (Speed in m/s, Winkel im Bogenmass).
+Ein verbreitetes Austauschformat fuer Rundendaten: eine Kopfzeile, eine
+Zeile je Abtastpunkt, Werte in iRacing-Einheiten (Speed in m/s, Winkel im
+Bogenmass).
 
     LapDistPct,Throttle,Brake,Speed,SteeringWheelAngle,Gear,Lat,Lon,RPM,
     Clutch,ABSActive,DRSActive,LatAccel,LongAccel,VertAccel,Yaw,YawRate,
     PositionType
 
 Damit laesst sich eine fremde Bestrunde als Referenz einlesen - und
-umgekehrt eine eigene Runde ausgeben, um sie in VirtualCoach oder einem
-anderen Werkzeug als Referenz zu verwenden.
+umgekehrt eine eigene Runde ausgeben, um sie in einem anderen Werkzeug
+als Referenz zu verwenden.
 
 Zwei Fallstricke stecken im Format:
 

@@ -1,6 +1,6 @@
 """Setzt eine Runde aus einer .ibt-Datei als Referenz - auch eine fremde.
 
-Gedacht fuer heruntergeladene Runden (z. B. Garage61), um gegen eine schnellere
+Gedacht fuer heruntergeladene Runden, um gegen eine schnellere
 Rundenzeit zu vergleichen und deren Brems- und Gaspunkte im Overlay zu sehen.
 
     python set_reference.py "<datei.ibt>"            # schnellste gueltige Runde

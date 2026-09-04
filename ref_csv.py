@@ -5,7 +5,7 @@ Einlesen - eine fremde Bestrunde wird zur Referenz des Coaches:
     python ref_csv.py import fremde_runde.csv --car "Porsche 911 Cup (992.2)" \
         --track "monza full" --setup open --track-len 5750.8 --lap-time 106.204
 
-Ausgeben - eine eigene Runde fuer VirtualCoach oder ein anderes Werkzeug:
+Ausgeben - eine eigene Runde fuer ein anderes Werkzeug:
 
     python ref_csv.py export laps/<ordner>/lap_012.npz meine_runde.csv
 

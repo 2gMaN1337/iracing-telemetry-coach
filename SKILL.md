@@ -72,7 +72,7 @@ zeigt die Veränderung gegen die gespeicherte Basis.
 ## Eine fremde Runde als Referenz nehmen
 
 Die Referenz muss nicht die eigene beste Runde sein. Jede `.ibt`-Datei geht -
-etwa eine heruntergeladene Runde aus Garage61 oder die eines Teamkollegen.
+etwa eine heruntergeladene Runde oder die eines Teamkollegen.
 Dann zeigen Delta, Report und die Overlay-Marker, wo dessen Runde anders
 aussieht als die eigene.
 
