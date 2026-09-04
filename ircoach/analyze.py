@@ -213,6 +213,31 @@ def corner_metrics(lap: Lap, c: dict) -> dict:
 # --------------------------------------------------------------------------
 # Rundenvergleich
 # --------------------------------------------------------------------------
+def _loss_window(dist: np.ndarray, delta: np.ndarray, lo: int, hi: int,
+                 win_m: float = 60.0) -> dict | None:
+    """Das Fenster im Abschnitt, in dem am meisten Zeit verloren geht.
+
+    Ein Verlust, der sich auf wenige Meter draengt, hat eine andere Ursache
+    als einer, der sich gleichmaessig ueber die Kurve verteilt - und nur der
+    erste laesst sich mit einer einzelnen Anweisung beheben.
+    """
+    total = float(delta[hi] - delta[lo])
+    if total <= 0.02:
+        return None
+    step = float(dist[1] - dist[0])
+    w = max(2, int(round(win_m / step)))
+    if hi - lo <= w:
+        return None
+    seg = delta[lo:hi + 1]
+    gain = seg[w:] - seg[:-w]
+    k = int(np.argmax(gain))
+    best = float(gain[k])
+    if best <= 0:
+        return None
+    return dict(d_from=float(dist[lo + k]), d_to=float(dist[lo + k + w]),
+                seconds=round(best, 3), share=round(best / total, 3))
+
+
 def compare(lap: Lap, ref: Lap, corners: list[dict]) -> dict:
     """Delta-Zeit-Verlauf + Kurvenvergleich gegen die Referenz."""
     delta = lap.data["t"] - ref.data["t"]
@@ -239,6 +264,7 @@ def compare(lap: Lap, ref: Lap, corners: list[dict]) -> dict:
         mid = c["i_end"]
         cur["delta_corner"] = float(delta[mid] - delta[lo])
         cur["delta_straight"] = float(delta[hi] - delta[mid])
+        cur["loss"] = _loss_window(lap.dist, delta, lo, hi)
         if offset is not None:
             cur["line"] = corner_line(offset, c)
         res["corners"].append(cur)
@@ -278,6 +304,15 @@ def make_tips(cmp: dict, max_corners: int = 3) -> list[dict]:
                 f.append(("bremspunkt_spaet",
                           "Du bremst %.0f m spaeter - pruefe, ob du dich damit verbremst." % dd))
 
+        # Eintrittsgeschwindigkeit. Ohne diese Pruefung bleibt eine Kurve
+        # unerklaert, in der Bremspunkt, Scheitel und Ausgang alle passen und
+        # der Verlust allein daraus entsteht, dass man zu langsam ankommt.
+        dve = c["v_entry"] - r["v_entry"]
+        if dve < -4:
+            f.append(("eintritt_langsam",
+                      "Du kommst schon %.1f km/h langsamer in den Abschnitt (%.0f statt %.0f km/h)."
+                      % (abs(dve), c["v_entry"], r["v_entry"])))
+
         # Scheitelpunkt-Geschwindigkeit
         dv = c["v_min"] - r["v_min"]
         if dv < -3:
@@ -316,10 +351,15 @@ def make_tips(cmp: dict, max_corners: int = 3) -> list[dict]:
                 and c["abs_pct"] - r["abs_pct"] > 8):
             f.append(("abs", "ABS regelt auf %.0f%% des Abschnitts (Referenz %.0f%%) - Bremsdruck zu hoch."
                       % (c["abs_pct"], r["abs_pct"])))
+        # Laenger von der Bremse rollen hilft nur, wenn am Scheitelpunkt auch
+        # Geschwindigkeit fehlt. Ist man dort ohnehin schon schneller als die
+        # Referenz, liegt der Verlust am Ausgang - dann treibt dieser Hinweis
+        # den Fahrer Runde um Runde weiter ueber das Optimum hinaus.
         if (c["trail_m"] is not None and r["trail_m"] is not None
-                and c["trail_m"] - r["trail_m"] < -15):
+                and c["trail_m"] - r["trail_m"] < -15 and dv <= 1.0):
             f.append(("trail_kurz",
-                      "Du gehst zu abrupt von der Bremse - laenger und weicher ausrollen lassen."))
+                      "Du gehst zu abrupt von der Bremse - laenger und weicher ausrollen lassen "
+                      "(Bremse haelt %.0f m, Referenz %.0f m)." % (c["trail_m"], r["trail_m"])))
 
         # Traktion / Stabilitaet
         sp, rsp = c["spin_ratio"], r["spin_ratio"]
@@ -354,6 +394,16 @@ def make_tips(cmp: dict, max_corners: int = 3) -> list[dict]:
                           "%.2f s gehen auf der folgenden Geraden verloren, obwohl die Ausgangsgeschwindigkeit passt - Schaltpunkte, Linie oder Windschatten pruefen."
                           % c["delta_straight"]))
 
+        # Wo genau die Zeit liegt. Wird immer genannt, wenn der Verlust stark
+        # konzentriert ist - und ersatzweise dann, wenn keine der Regeln oben
+        # gegriffen hat: "kein einzelner Fehler dominant" ist als einzige
+        # Auskunft wertlos, die Fundstelle dagegen nachpruefbar.
+        lw = c.get("loss")
+        if lw and (lw["share"] >= 0.5 or not f):
+            f.append(("brennpunkt",
+                      "%.0f%% des Verlusts (%.2f s) entstehen zwischen %.0f m und %.0f m."
+                      % (lw["share"] * 100, lw["seconds"], lw["d_from"], lw["d_to"])))
+
         f.sort(key=lambda x: PRIORITY.get(x[0], 50))
         tips.append(dict(corner=c["n"], delta=c["delta"],
                          delta_straight=c.get("delta_straight", 0.0),
@@ -364,6 +414,7 @@ def make_tips(cmp: dict, max_corners: int = 3) -> list[dict]:
 
 # Reihenfolge, in der Befunde genannt werden: erst Ursachen, dann Symptome.
 PRIORITY = {
+    "eintritt_langsam": -1, "brennpunkt": -0.5,
     "vmin_niedrig": 0, "vmin_hoch": 1, "bremspunkt_frueh": 2, "bremspunkt_spaet": 3,
     "ausgang": 4, "gas_spaet": 5, "vollgas_spaet": 6, "segeln": 7,
     "blockierer": 8, "spin": 9, "abs": 10, "trail_kurz": 11,

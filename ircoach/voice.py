@@ -21,6 +21,7 @@ SHORT_FIX = {
     "gas_spaet": "früher aufs Gas",
     "ausgang": "früher aufs Gas",
     "vollgas_spaet": "eher voll durchziehen",
+    "eintritt_langsam": "später verzögern",
     "vmin_niedrig": "mehr Speed mitnehmen",
     "vmin_hoch": "früher verzögern",
     "gang": "anderer Gang",
@@ -44,7 +45,7 @@ VOICE_PRIORITY = [
     "blockierer", "abs", "spin",
     "bremspunkt_frueh", "bremspunkt_spaet", "trail_kurz",
     "segeln", "gas_spaet", "ausgang", "vollgas_spaet",
-    "vmin_niedrig", "vmin_hoch",
+    "eintritt_langsam", "vmin_niedrig", "vmin_hoch",
     # Linie kommt nach den Pedal-Ursachen: solange Bremsdruck oder Gaszeitpunkt
     # nicht stimmen, bringt eine Linienkorrektur wenig.
     "linie_scheitel_links", "linie_scheitel_rechts",
@@ -64,6 +65,19 @@ def load_turn_names(refs_dir: str, track_slug: str) -> dict:
             return {int(k): v for k, v in json.load(f).items()}
     except Exception:
         return {}
+
+
+# Wirkrichtung einer Anweisung: +1 heisst "mehr Tempo hinein, frueher aufs
+# Gas", -1 heisst "frueher oder laenger verzoegern". Kippt die Anweisung fuer
+# dieselbe Kurve von einer Runde auf die naechste ins Gegenteil, folgt der
+# Fahrer beiden - und wandert dabei ueber das Optimum hinaus, statt sich ihm
+# zu naehern. Solche Umkehrungen werden verschwiegen.
+DIRECTION = {
+    "bremspunkt_frueh": +1, "vmin_niedrig": +1, "eintritt_langsam": +1,
+    "segeln": +1, "gas_spaet": +1, "ausgang": +1, "vollgas_spaet": +1,
+    "bremspunkt_spaet": -1, "vmin_hoch": -1, "trail_kurz": -1,
+    "abs": -1, "blockierer": -1, "spin": -1,
+}
 
 
 def _cap(s: str) -> str:
@@ -119,6 +133,14 @@ def spoken_line(cmp: dict, tips: list, names: dict | None = None,
             n = tips[0]["corner"]
             return "%s: kein klarer Fehler." % _cap(names.get(n, "Kurve %d" % n)), None
         return "Sauber, so weiter.", None
+
+    if last is not None:
+        # Gegenanweisung zur Vorrunde in derselben Kurve: lieber die
+        # naechstgroessere Kurve nennen als den Fahrer hin und her schicken.
+        d_last = DIRECTION.get(last[1], 0)
+        cands = [c for c in cands
+                 if not (c[0] == last[0] and d_last
+                         and DIRECTION.get(c[1], 0) == -d_last)] or cands
 
     pick, repeat = cands[0], False
     if last is not None and cands[0] == last:
