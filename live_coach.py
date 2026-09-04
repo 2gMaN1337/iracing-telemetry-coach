@@ -31,6 +31,7 @@ import irsdk
 
 from ircoach import balance as bal
 from ircoach import corners as corner_set
+from ircoach import incidents as inc_mod
 from ircoach import opponents as opp
 from ircoach.analyze import compare, detect_corners, make_tips
 from ircoach.channels import CHANNELS
@@ -57,6 +58,7 @@ class Collector:
                  voice_name: str = DEFAULT_VOICE, rate: float = DEFAULT_RATE, volume: int = 100,
                  gain: float = DEFAULT_GAIN, feed: bool = True):
         self.ir = irsdk.IRSDK()
+        self.inc = inc_mod.Tracker()
         self.persist = persist
         self.feed = feed          # session.jsonl schreiben (im Replay unerwuenscht)
         self.speaker = Speaker(voice=voice_name, rate=rate, volume=volume,
@@ -89,6 +91,7 @@ class Collector:
         self.drivers = {}
         self.rot_streak = 0        # Runden in Folge ausserhalb des Zielbands
         self.last_advice = None
+        self.inc.reset()           # Vorfallspunkte der Session
 
     def read_meta(self):
         wi = self.ir["WeekendInfo"] or {}
@@ -277,13 +280,26 @@ class Collector:
         cmp["bias_advice"] = adv
 
         # Zuerst sprechen: auf der Start/Ziel-Geraden zaehlt jede Zehntelsekunde.
+        # ---- Vorfaelle dieser Runde ----
+        events = self.inc.for_lap(lap.lap_no)
+        cmp["incidents"] = events
+        cmp["incidents_total"] = self.inc.total
+
         spoken, self.last_spoken = spoken_line(cmp, tips, self.turn_names,
                                                self.last_spoken)
+        # Vorfallspunkte zuerst: sie kosten Safety Rating und wiegen damit
+        # schwerer als eine Zehntelsekunde in irgendeiner Kurve.
+        say_inc = inc_mod.spoken(events)
+        if say_inc:
+            spoken = say_inc + " " + spoken
         if adv:
             spoken = adv[0] + " " + spoken
         self.speaker.say(spoken)
 
         txt = console_report(cmp, tips, self.meta)
+        lines = inc_mod.lap_lines(events, self.inc.total)
+        if lines:
+            txt += "\n" + "\n".join(lines)
         txt += "\nAnsage: %s" % spoken
         if is_new_ref:
             txt += "\n*** NEUE BESTZEIT - ab jetzt Referenz. ***"
@@ -304,6 +320,8 @@ class Collector:
                     gap_delta=change.get("delta") if change else None,
                     gap_to_rival=change.get("gap") if change else None,
                     bias=cmp["bias_shown"], bias_advice=adv[0] if adv else None,
+                    incidents=sum(e["points"] for e in events),
+                    incidents_total=self.inc.total,
                     tips=[dict(corner=t["corner"], delta=round(t["delta"], 3),
                                findings=[x[1] for x in t["findings"]]) for t in tips])
         if self.feed:
@@ -349,6 +367,15 @@ class Collector:
                             self.buf = {}
                     self.last_pct = pct
                     self.sample()
+                    # Vorfallszaehler bei jedem Tick pruefen: nur so laesst
+                    # sich der Sprung der Stelle zuordnen, an der er passiert.
+                    for e in self.inc.update(self.ir["PlayerCarMyIncidentCount"],
+                                             self.lap_no,
+                                             pct * (self.meta.get("track_len") or 0.0),
+                                             (self.ir["Speed"] or 0.0) * 3.6):
+                        print("[coach] %dx bei %d m - %s (Session: %d)"
+                              % (e["points"], e["dist"], inc_mod.art(e["points"]),
+                                 self.inc.total), flush=True)
                     # Gegnerdaten seltener abtasten als die eigene Telemetrie
                     self.opp_tick = getattr(self, "opp_tick", 0) + 1
                     if self.opp_tick % 15 == 0:
