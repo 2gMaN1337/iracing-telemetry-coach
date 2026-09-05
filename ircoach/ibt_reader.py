@@ -41,9 +41,14 @@ def read_laps(path: str, min_speed: float = 5.0) -> tuple[list[Lap], dict]:
             drv = di["Drivers"][di["DriverCarIdx"]]
         except Exception:
             pass
+        # Fixed und Open getrennt halten - genau wie im Live-Coach, sonst
+        # laufen Runden beider Varianten in denselben Ordner und werden gegen
+        # dieselbe Referenz gestellt.
+        fixed = wi.get("WeekendOptions", {}).get("IsFixedSetup")
         meta = dict(track=wi.get("TrackName", "?"),
                     track_display=wi.get("TrackDisplayName", wi.get("TrackName", "?")),
                     car=drv.get("CarScreenName", "?"),
+                    setup="fixed" if str(fixed) == "1" else "open",
                     track_len=track_len)
 
         cols = {}

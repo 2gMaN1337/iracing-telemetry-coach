@@ -8,6 +8,9 @@ damit im Dashboard auch Linienvergleich und Blockierer-Erkennung erscheinen.
     python import_session.py --latest        # neueste Datei
     python import_session.py "<pfad.ibt>"
     python import_session.py --latest --keep # bestehende Runden nicht ersetzen
+
+Die importierten Runden landen in einem eigenen Unterordner je .ibt-Datei,
+damit sie den Live-Mitschnitt nicht ueberschreiben. --in-place hebt das auf.
 """
 from __future__ import annotations
 
@@ -33,6 +36,9 @@ def main() -> int:
                     help="vorhandene Runden im Ordner behalten")
     ap.add_argument("--no-persist", action="store_true",
                     help="Referenzrunde nicht aktualisieren")
+    ap.add_argument("--in-place", action="store_true",
+                    help="in den Live-Ordner schreiben statt in einen eigenen "
+                         "(ueberschreibt gleichnamige Runden des Mitschnitts)")
     a = ap.parse_args()
 
     path = a.path
@@ -49,7 +55,16 @@ def main() -> int:
         print("Keine vollstaendigen Runden in der Datei.")
         return 1
 
-    out_dir = os.path.join(LAPS_DIR, "%s_%s" % (slug(meta["car"]), slug(meta["track"])))
+    # Eigener Ordner je .ibt-Datei. Der Live-Mitschnitt zaehlt seine Runden ab
+    # der ersten Zieldurchfahrt, die Disk-Telemetrie ab dem Einsteigen - die
+    # Nummern decken sich also nicht. Schrieben beide in denselben Ordner,
+    # ueberschriebe der Import fremde Runden, statt sie zu ergaenzen.
+    stem = slug(os.path.splitext(os.path.basename(path))[0])
+    out_dir = os.path.join(LAPS_DIR, "%s_%s_%s" % (
+        slug(meta["car"]), slug(meta["track"]), meta.get("setup", "open")),
+        "ibt_%s" % stem)
+    if a.in_place:
+        out_dir = os.path.dirname(out_dir)
     os.makedirs(out_dir, exist_ok=True)
     if not a.keep:
         for f in glob.glob(os.path.join(out_dir, "lap_*")):
